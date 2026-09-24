@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#221a3a">
+<title>Хоул</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Rubik:wght@500;700;800;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #221a3a; --ink-2: #4a4066; --paper: #fff8ee; --paper-2: #f3e9da;
+    --coral: #ff5a4e; --coral-d: #d63a30; --gold: #ffc233; --gold-d: #d99a0b;
+    --hard: #ff8a1f; --super: #e0245e; --ok: #22a866;
+    --r: 18px; --shadow: 0 10px 30px rgba(20, 12, 40, .28);
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--ink); color: var(--ink); font-family: 'Rubik', system-ui, sans-serif; user-select: none; -webkit-user-select: none; }
+  ::selection { background: var(--gold); color: var(--ink); }
+  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+  .hidden { display: none !important; }
+  button { font: inherit; cursor: pointer; border: 0; color: inherit; }
+  button:focus-visible { outline: 3px solid var(--gold); outline-offset: 3px; }
+
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 58px; padding: 0 28px; border-radius: 16px;
+    font-weight: 800; font-size: 20px; letter-spacing: .01em; background: var(--paper); color: var(--ink);
+    box-shadow: 0 5px 0 var(--paper-2), 0 12px 24px rgba(20, 12, 40, .25); transition: transform .12s cubic-bezier(.2, .8, .2, 1), box-shadow .12s; }
+  .btn:active { transform: translateY(4px); box-shadow: 0 1px 0 var(--paper-2), 0 6px 12px rgba(20, 12, 40, .25); }
+  .btn.primary { background: var(--coral); color: #fff; box-shadow: 0 5px 0 var(--coral-d), 0 12px 24px rgba(214, 58, 48, .35); }
+  .btn.primary:active { box-shadow: 0 1px 0 var(--coral-d), 0 6px 12px rgba(214, 58, 48, .3); }
+  .btn.gold { background: var(--gold); color: var(--ink); box-shadow: 0 5px 0 var(--gold-d), 0 12px 24px rgba(217, 154, 11, .3); }
+  .icon-btn { width: 48px; height: 48px; border-radius: 14px; display: grid; place-items: center; background: var(--paper); box-shadow: 0 4px 0 var(--paper-2), 0 8px 18px rgba(20,12,40,.22); }
+  .icon-btn:active { transform: translateY(3px); box-shadow: 0 1px 0 var(--paper-2); }
+  .icon-btn svg { width: 24px; height: 24px; stroke: var(--ink); fill: none; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+  .mute .x { display: none; } .mute.off .x { display: inline; } .mute.off .w { display: none; }
+
+  .screen { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px 16px; padding-top: max(24px, env(safe-area-inset-top)); }
+  .scrim { background: linear-gradient(180deg, rgba(34, 26, 58, .15) 0%, rgba(34, 26, 58, .55) 100%); }
+
+  /* меню */
+  #menu { gap: 14px; }
+  .logo { font-weight: 900; font-size: clamp(72px, 20vw, 150px); line-height: .9; letter-spacing: -.035em; color: #fff; margin: 0 0 6px;
+    text-shadow: 0 6px 0 var(--ink), 0 18px 40px rgba(20, 12, 40, .45); display: flex; align-items: center; gap: .04em; }
+  .logo .o { display: inline-block; width: .74em; height: .74em; border-radius: 50%; background: radial-gradient(circle at 50% 40%, #3a2366 0%, #0d0818 70%); box-shadow: 0 0 0 .07em var(--coral), 0 6px 0 .07em var(--ink); }
+  .menu-sub { color: #fff; font-weight: 700; font-size: 17px; margin: 0 0 18px; text-shadow: 0 2px 8px rgba(20, 12, 40, .6); text-align: center; max-width: 30ch; }
+  .menu-col { display: flex; flex-direction: column; gap: 14px; width: min(340px, 100%); }
+  .corner { position: fixed; top: max(16px, env(safe-area-inset-top)); right: 16px; }
+
+  /* уровни */
+  #levels { justify-content: flex-start; background: var(--paper); padding: 0; }
+  .levels-head { position: sticky; top: 0; width: 100%; display: flex; align-items: center; gap: 14px; padding: 16px; padding-top: max(16px, env(safe-area-inset-top)); background: var(--paper); z-index: 2; border-bottom: 2px solid var(--paper-2); }
+  .levels-head h2 { margin: 0; font-size: 28px; font-weight: 900; letter-spacing: -.02em; }
+  .levels-head p { margin: 0 0 0 auto; color: var(--ink-2); font-weight: 700; font-size: 15px; }
+  .levels-scroll { width: 100%; overflow-y: auto; flex: 1; -webkit-overflow-scrolling: touch; }
+  #level-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(68px, 1fr)); gap: 12px; padding: 18px 16px 40px; max-width: 900px; margin: 0 auto; }
+  .lvl { aspect-ratio: 1; border-radius: 16px; background: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+    box-shadow: 0 4px 0 #e6dac6, 0 6px 14px rgba(20,12,40,.08); border: 3px solid transparent; transition: transform .12s; }
+  .lvl:active { transform: translateY(3px); }
+  .lvl .num { font-weight: 900; font-size: 22px; font-variant-numeric: tabular-nums; }
+  .lvl .st { display: flex; gap: 1px; }
+  .lvl .st svg { width: 13px; height: 13px; fill: #e6dac6; }
+  .lvl .st svg.on { fill: var(--gold); }
+  .lvl.hard { border-color: var(--hard); }
+  .lvl.super { border-color: var(--super); background: #fff0f3; }
+  .lvl.current { background: var(--coral); color: #fff; box-shadow: 0 4px 0 var(--coral-d), 0 8px 18px rgba(214,58,48,.35); }
+  .lvl.current .st svg { fill: rgba(255,255,255,.35); }
+  .lvl.locked { background: var(--paper-2); color: #b3a68f; box-shadow: none; cursor: default; }
+  .lvl.locked .st { display: none; }
+  .legend { display: flex; gap: 18px; justify-content: center; padding: 14px 16px 0; color: var(--ink-2); font-weight: 700; font-size: 14px; flex-wrap: wrap; }
+  .legend i { display: inline-block; width: 14px; height: 14px; border-radius: 5px; border: 3px solid; vertical-align: -2px; margin-right: 6px; }
+
+  /* карточки */
+  .card { background: var(--paper); border-radius: 24px; padding: 26px 24px 24px; width: min(420px, 100%); box-shadow: var(--shadow); text-align: center; }
+  .card h2 { margin: 6px 0 16px; font-size: 34px; font-weight: 900; letter-spacing: -.025em; line-height: 1.05; }
+  .tag { display: inline-block; padding: 6px 12px; border-radius: 999px; font-weight: 800; font-size: 14px; background: var(--paper-2); color: var(--ink-2); }
+  .tag.hard { background: var(--hard); color: #fff; } .tag.super { background: var(--super); color: #fff; }
+  .goals { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+  .goal { background: #fff; border-radius: 16px; padding: 12px 10px; }
+  .goal b { display: block; font-size: 32px; font-weight: 900; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+  .goal span { color: var(--ink-2); font-weight: 700; font-size: 14px; }
+  .req-label { color: var(--ink-2); font-weight: 700; font-size: 14px; margin: 4px 0 8px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 999px; font-weight: 800; font-size: 15px; background: var(--gold); color: var(--ink); }
+  .chip::before { content: ''; width: 9px; height: 9px; border-radius: 3px; background: var(--ink); transform: rotate(45deg); }
+  .chip.done { background: var(--ok); color: #fff; }
+  .chip.done::before { width: 10px; height: 6px; border-radius: 0; background: none; border: solid #fff; border-width: 0 0 3px 3px; transform: rotate(-45deg) translate(1px, -1px); }
+  .hint { margin: 16px 0 0; color: var(--ink-2); font-size: 15px; font-weight: 600; line-height: 1.4; }
+  .card .actions { display: flex; gap: 12px; margin-top: 20px; }
+  .card .actions .btn { flex: 1; padding: 0 16px; }
+
+  /* HUD */
+  #hudwrap { pointer-events: none; position: fixed; inset: 0; }
+  .hud-top { position: absolute; top: max(12px, env(safe-area-inset-top)); left: 12px; right: 12px; display: flex; gap: 10px; align-items: flex-start; }
+  .pill { background: var(--paper); border-radius: 14px; padding: 8px 14px; font-weight: 900; font-size: 22px; box-shadow: 0 4px 0 var(--paper-2), 0 8px 18px rgba(20,12,40,.2); font-variant-numeric: tabular-nums; }
+  #hud-timer.low { background: var(--super); color: #fff; box-shadow: 0 4px 0 #a8123f; animation: beat 1s infinite; }
+  @keyframes beat { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+  .hud-mid { flex: 1; display: flex; flex-direction: column; gap: 8px; align-items: center; min-width: 0; }
+  .bar { position: relative; width: min(420px, 100%); height: 40px; border-radius: 14px; background: rgba(34,26,58,.55); overflow: hidden; box-shadow: 0 8px 18px rgba(20,12,40,.2); }
+  #hud-bar-fill { position: absolute; inset: 0; background: var(--coral); transform-origin: left; transform: scaleX(0); transition: transform .25s cubic-bezier(.2,.8,.2,1); }
+  #hud-count { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; font-weight: 900; font-size: 19px; font-variant-numeric: tabular-nums; text-shadow: 0 1px 2px rgba(0,0,0,.3); }
+  #hud-level { font-size: 16px; padding: 10px 12px; }
+  #hud-req .chip { font-size: 13px; padding: 5px 10px; box-shadow: 0 3px 10px rgba(20,12,40,.2); }
+  #hud-pause { pointer-events: auto; }
+  .hud-left { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+
+  #joy { position: fixed; left: 0; top: 0; width: 0; height: 0; pointer-events: none; opacity: 0; transition: opacity .15s; }
+  #joy.on { opacity: 1; }
+  #joy::before { content: ''; position: absolute; left: -55px; top: -55px; width: 110px; height: 110px; border-radius: 50%; border: 3px solid rgba(255,255,255,.7); background: rgba(34,26,58,.18); }
+  #joy-knob { position: absolute; left: -22px; top: -22px; width: 44px; height: 44px; border-radius: 50%; background: rgba(255,255,255,.9); box-shadow: 0 4px 12px rgba(20,12,40,.3); }
+
+  #end .stars { display: flex; justify-content: center; gap: 8px; margin: 0 0 10px; }
+  #end .star { width: 54px; height: 54px; fill: #e6dac6; transform: scale(.85); transition: transform .4s cubic-bezier(.16, 1, .3, 1), fill .2s; }
+  #end .star.on { fill: var(--gold); transform: scale(1); }
+  #end .star:nth-child(2) { width: 66px; height: 66px; margin-top: -8px; }
+  #end.win h2 { color: var(--ok); }
+  #end-msg { color: var(--ink-2); font-weight: 700; font-size: 17px; margin: 0; line-height: 1.4; }
+  .pop { animation: pop .35s cubic-bezier(.16, 1, .3, 1); }
+  @keyframes pop { from { transform: scale(.9) translateY(12px); opacity: 0; } to { transform: none; opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .pop, #hud-timer.low { animation: none; } }
+  @media (max-width: 520px) {
+    .pill { font-size: 19px; padding: 7px 11px; }
+    .bar { height: 34px; } #hud-count { font-size: 17px; }
+    #hud-level { font-size: 14px; padding: 8px 10px; }
+    .card h2 { font-size: 30px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="joy"><div id="joy-knob"></div></div>
+
+<section id="menu" class="screen scrim">
+  <h1 class="logo" aria-label="Хоул">Х<span class="o"></span>УЛ</h1>
+  <p class="menu-sub">Глотай город целиком. Без интернета и без рекламы.</p>
+  <div class="menu-col">
+    <button id="menu-play" class="btn primary">Играть</button>
+    <button id="menu-levels" class="btn">Уровни</button>
+  </div>
+  <button class="icon-btn mute corner" aria-label="Звук">
+    <svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9z"/><path class="w" d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/><path class="x" d="M17 9l5 6M22 9l-5 6"/></svg>
+  </button>
+</section>
+
+<section id="levels" class="screen hidden">
+  <div class="levels-head">
+    <button id="levels-back" class="icon-btn" aria-label="Назад"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+    <h2>Уровни</h2>
+    <p id="levels-progress"></p>
+  </div>
+  <div class="levels-scroll">
+    <div class="legend"><span><i style="border-color:var(--hard)"></i>каждый 5-й: сложный</span><span><i style="border-color:var(--super)"></i>каждый 10-й: очень сложный</span></div>
+    <div id="level-grid"></div>
+  </div>
+</section>
+
+<section id="intro" class="screen scrim hidden">
+  <div class="card pop">
+    <span id="intro-tag" class="tag"></span>
+    <h2 id="intro-level"></h2>
+    <div class="goals">
+      <div class="goal"><b id="intro-target"></b><span>проглотить</span></div>
+      <div class="goal"><b id="intro-time"></b><span>на всё</span></div>
+    </div>
+    <p class="req-label">И обязательно найти:</p>
+    <div id="intro-req" class="chips"></div>
+    <p id="intro-hint" class="hint">Тяни пальцем или мышкой в любом месте экрана. На клавиатуре WASD или стрелки. Начни с мелочи: люди, урны, конусы. Чем больше съешь, тем шире дыра. Жёлтая стрелка ведёт к обязательным предметам.</p>
+    <div class="actions">
+      <button id="intro-back" class="btn">Уровни</button>
+      <button id="intro-play" class="btn primary">Поехали</button>
+    </div>
+  </div>
+</section>
+
+<div id="hudwrap" class="hidden">
+  <div class="hud-top">
+    <div class="hud-left">
+      <div id="hud-timer" class="pill">0:00</div>
+      <div id="hud-level" class="pill">Ур. 1</div>
+    </div>
+    <div class="hud-mid">
+      <div class="bar"><div id="hud-bar-fill"></div><div id="hud-count">0 / 0</div></div>
+      <div id="hud-req" class="chips"></div>
+    </div>
+    <button id="hud-pause" class="icon-btn" aria-label="Пауза"><svg viewBox="0 0 24 24"><path d="M9 6v12M15 6v12"/></svg></button>
+  </div>
+</div>
+
+<section id="pause" class="screen scrim hidden">
+  <div class="card pop">
+    <h2>Пауза</h2>
+    <div class="menu-col" style="margin:0 auto">
+      <button id="pause-resume" class="btn primary">Продолжить</button>
+      <button id="pause-restart" class="btn">Заново</button>
+      <button id="pause-levels" class="btn">Уровни</button>
+      <button class="btn mute" aria-label="Звук"><span class="w">Звук: вкл</span><span class="x">Звук: выкл</span></button>
+    </div>
+  </div>
+</section>
+
+<section id="end" class="screen scrim hidden">
+  <div class="card pop">
+    <div id="end-stars" class="stars">
+      <svg class="star" viewBox="0 0 24 24"><path d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5L2.5 9.4l6.6-.9z"/></svg>
+      <svg class="star" viewBox="0 0 24 24"><path d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5L2.5 9.4l6.6-.9z"/></svg>
+      <svg class="star" viewBox="0 0 24 24"><path d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5L2.5 9.4l6.6-.9z"/></svg>
+    </div>
+    <h2 id="end-title"></h2>
+    <p id="end-msg"></p>
+    <div class="actions">
+      <button id="end-levels" class="btn">Уровни</button>
+      <button id="end-retry" class="btn">Ещё раз</button>
+    </div>
+    <div class="actions" style="margin-top:12px">
+      <button id="end-next" class="btn primary">Следующий уровень</button>
+    </div>
+  </div>
+</section>
+
+<script type="module" src="js/game.js?v=5"></script>
+</body>
+</html>
