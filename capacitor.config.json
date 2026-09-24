@@ -1,0 +1,6 @@
+{
+  "appId": "io.github.taoo1997.holecity",
+  "appName": "Хоул",
+  "webDir": "www",
+  "android": { "backgroundColor": "#221a3a" }
+}

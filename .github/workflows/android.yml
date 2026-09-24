@@ -1,0 +1,66 @@
+name: Android APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Веб-файлы игры
+        run: |
+          mkdir -p www
+          cp -r index.html js fonts www/
+
+      - name: Capacitor
+        run: |
+          npm install --no-audit --no-fund
+          npx cap add android
+          npx cap sync android
+
+      - name: Иконка и настройки
+        run: |
+          RES=android/app/src/main/res
+          rm -rf $RES/mipmap-anydpi-v26
+          for d in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
+            cp android-icons/$d.png $RES/mipmap-$d/ic_launcher.png
+            cp android-icons/$d.png $RES/mipmap-$d/ic_launcher_round.png
+            rm -f $RES/mipmap-$d/ic_launcher_foreground.png
+          done
+          # экран не гаснет от поворота, полноэкранный режим
+          sed -i 's|android:configChanges="|android:screenOrientation="fullUser" android:configChanges="|' android/app/src/main/AndroidManifest.xml
+
+      - name: Сборка
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+          cp app/build/outputs/apk/debug/app-debug.apk ../hole-city.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hole-city-apk
+          path: hole-city.apk
+
+      - name: Релиз со ссылкой на APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete apk --cleanup-tag -y || true
+          gh release create apk hole-city.apk --title "Хоул для Android" --notes "Сборка из ${GITHUB_SHA::7}. Скачай hole-city.apk на телефон и установи (разреши установку из неизвестных источников)." --latest

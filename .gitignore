@@ -1,1 +1,4 @@
 open-claude-here.bat
+node_modules/
+www/
+android/

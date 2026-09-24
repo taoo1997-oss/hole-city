@@ -921,3 +921,18 @@ syncMute();
 toMenu();
 requestAnimationFrame(frame);
 window.__game = { game, input, renderer, scene, camera, sim(secs, cb) { for (let t = 0; t < secs && game.state === "play"; t += 1 / 30) { cb && cb(); step(1 / 30); } }, get world() { return world; }, openIntro, startPlay, levelConfig };
+
+// ---------- Android-приложение ----------
+const Cap = window.Capacitor;
+if (Cap?.isNativePlatform?.()) {
+  try { Cap.Plugins.StatusBar?.hide(); } catch {}
+  try {
+    Cap.Plugins.App?.addListener('backButton', () => {
+      if (game.state === 'play') togglePause();
+      else if (game.state === 'pause') togglePause();
+      else if (game.state === 'intro' || game.state === 'end') $('menu-levels').onclick();
+      else if (game.state === 'levels') toMenu();
+      else Cap.Plugins.App.exitApp();
+    });
+  } catch {}
+}
