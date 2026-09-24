@@ -210,6 +210,8 @@ const TYPES = {
   } },
 };
 
+const ROUND = new Set(['tree', 'pine', 'bush', 'fountain', 'watertower', 'cone', 'hydrant', 'trash', 'lamp']);
+
 // уникальные здания
 function makeHouse(rng, th) {
   const w = 5 + rng() * 1.6, d = 5 + rng() * 1.6, h = 2.8 + rng() * 1.6;
@@ -255,6 +257,9 @@ const REQ_POOL = [
   ['house', 6], ['truck', 7], ['watertower', 9], ['office', 13], ['skyscraper', 22],
 ];
 const TYPE_NAME = { bus: 'Автобус', icecream: 'Фургон с мороженым', police: 'Полиция', fountain: 'Фонтан', firetruck: 'Пожарная машина', statue: 'Памятник', house: 'Дом', truck: 'Грузовик', watertower: 'Водонапорная башня', office: 'Офис', skyscraper: 'Небоскрёб' };
+
+const starCut = (cfg) => [Math.ceil(cfg.time * 0.2), Math.ceil(cfg.time * 0.4)]; // сколько секунд должно остаться для 2 и 3 звёзд
+const starsFor = (cfg, left) => { const [c2, c3] = starCut(cfg); return left >= c3 ? 3 : left >= c2 ? 2 : 1; };
 
 function levelConfig(n) {
   const rng = mulberry32(n * 7919 + 13);
@@ -305,15 +310,16 @@ const holeStencil = new THREE.Mesh(new THREE.CircleGeometry(1, 64).rotateX(-Math
   colorWrite: false, depthWrite: false, stencilWrite: true, stencilRef: 1, stencilFunc: THREE.AlwaysStencilFunc, stencilZPass: THREE.ReplaceStencilOp,
 }));
 holeStencil.position.y = 0.02; holeStencil.renderOrder = -10;
-const wallGeo = new THREE.CylinderGeometry(1, 1, 14, 64, 1, true);
+const wallGeo = new THREE.CylinderGeometry(1, 1, 14, 64, 10, true);
 { const c = new Float32Array(wallGeo.attributes.position.count * 3); const pa = wallGeo.attributes.position;
-  for (let i = 0; i < pa.count; i++) { const top = pa.getY(i) > 0; c.set(top ? [0.035, 0.015, 0.08] : [0, 0, 0], i * 3); }
+  // у кромки стенка чуть светлее, ниже уходит в черноту: видно, что это шахта, а не пятно
+  for (let i = 0; i < pa.count; i++) { const k = Math.exp(-(7 - pa.getY(i)) * 0.55); c.set([0.045 * k, 0.02 * k, 0.09 * k], i * 3); }
   wallGeo.setAttribute('color', new THREE.BufferAttribute(c, 3)); }
 const holeWall = new THREE.Mesh(wallGeo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide }));
 holeWall.position.y = -7;
 const holeBottom = new THREE.Mesh(new THREE.CircleGeometry(1, 48).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x000000 }));
 holeBottom.position.y = -13.9;
-const holeRim = new THREE.Mesh(new THREE.RingGeometry(1, 1.075, 72).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xff5a4e }));
+const holeRim = new THREE.Mesh(new THREE.RingGeometry(1, 1.1, 72).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xff5a4e }));
 holeRim.position.y = 0.04;
 const inner = new THREE.Group(); inner.add(holeWall, holeBottom);
 hole.add(holeStencil, inner, holeRim);
@@ -332,9 +338,25 @@ let world = null; // { objects, batches, meshes, S, cfg, ... }
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _p = new THREE.Vector3(), _ax = new THREE.Vector3();
 const ONE = new THREE.Vector3(1, 1, 1), ZERO = new THREE.Vector3(0, 0, 0), UP = new THREE.Vector3(0, 1, 0);
 
+const WHITE = new THREE.Color(1, 1, 1);
+function objQuat(o, q) {
+  q.setFromAxisAngle(UP, o.rot);
+  if (o.tilt) { _ax.set(o.ax, 0, o.az); if (_ax.lengthSq() > 1e-6) { _ax.normalize(); _q2.setFromAxisAngle(_ax, o.tilt); q.premultiply(_q2); } }
+  return q;
+}
+// затемнение в глубине дыры
+function setDark(o, f) {
+  if (Math.abs(o.dark - f) < 0.02 && f !== 1) return;
+  o.dark = f;
+  _col.setScalar(f);
+  if (o.batch) { o.batch.setColorAt(o.idx, _col); o.batch.instanceColor.needsUpdate = true; }
+  else if (o.mesh) {
+    if (f < 1 && o.mesh.material === MAT) o.mesh.material = MAT.clone();
+    if (o.mesh.material !== MAT) o.mesh.material.color.setScalar(f);
+  }
+}
 function writeMatrix(o) {
-  _q.setFromAxisAngle(UP, o.rot);
-  if (o.tilt) { _ax.set(o.ax, 0, o.az); if (_ax.lengthSq() > 1e-6) { _ax.normalize(); _q2.setFromAxisAngle(_ax, o.tilt); _q.premultiply(_q2); } }
+  objQuat(o, _q);
   _p.set(o.x, o.y, o.z);
   _m.compose(_p, _q, o.dead ? ZERO : ONE);
   if (o.batch) { o.batch.setMatrixAt(o.idx, _m); o.batch.instanceMatrix.needsUpdate = true; }
@@ -414,24 +436,24 @@ function buildWorld(cfg) {
         const x = ax + lot / 2 + a * (lot + 1.5), z = az + lot / 2 + c * (lot + 1.5);
         const big = rng() < 0.45 + Math.min(0.3, n / 150);
         const def = makeTower(rng, th, big);
-        spawnU(def, x, z, Math.floor(rng() * 4) * Math.PI / 2);
+        spawnU(def, x, z, c === 0 ? Math.PI : 0);
       }
       walkers(3 + Math.floor(rng() * 3), ax, az, ax + IN, az + IN);
-      if (rng() < 0.5) spawn('kiosk', Math.floor(rng() * 3), cx, cz, rng() * 6);
+      if (rng() < 0.5) spawn('kiosk', Math.floor(rng() * 3), cx, cz, Math.floor(rng() * 4) * Math.PI / 2);
     } else if (b.t === 'residential') {
       const lot = IN / 3;
       for (let a = 0; a < 3; a++) for (let c = 0; c < 3; c++) {
         const x = ax + lot / 2 + a * lot, z = az + lot / 2 + c * lot;
         const r = rng();
         if (r < 0.62 || (forced.house && a === 1 && c === 1)) {
-          spawnU(makeHouse(rng, th), x, z, Math.floor(rng() * 4) * Math.PI / 2);
+          spawnU(makeHouse(rng, th), x, z, c === 0 ? Math.PI : c === 2 ? 0 : a === 0 ? -Math.PI / 2 : a === 2 ? Math.PI / 2 : Math.floor(rng() * 4) * Math.PI / 2);
           if (rng() < 0.5) spawn('bush', Math.floor(rng() * nTree), x + lot / 2 - 0.9, z + lot / 2 - 0.9);
         } else if (r < 0.8) {
           spawn('tree', Math.floor(rng() * nTree), x - 1.2, z - 1); spawn('bush', Math.floor(rng() * nTree), x + 1.4, z + 1.2);
           spawn('car', Math.floor(rng() * 8), x + 1, z - 0.5, rng() < 0.5 ? 0 : Math.PI / 2);
         } else {
           spawn(th.snow ? 'pine' : 'tree', Math.floor(rng() * nTree), x - 1.3, z - 1.3); spawn(th.snow ? 'pine' : 'tree', Math.floor(rng() * nTree), x + 1.3, z + 1.3);
-          spawn('bench', 0, x + 1.3, z - 1.6, rng() * 6);
+          spawn('bench', 0, x + 1.3, z - 1.6, Math.floor(rng() * 4) * Math.PI / 2);
         }
       }
       walkers(1 + Math.floor(rng() * 3), ax, az, ax + IN, az + IN);
@@ -441,7 +463,7 @@ function buildWorld(cfg) {
         const s1 = makeShop(rng, th); spawnU(s1, x, az + 3.6, Math.PI); rects.push({ x, z: az + 3.6, w: 7.5, d: 7 });
         const s2 = makeShop(rng, th); spawnU(s2, x, az + IN - 3.6, 0); rects.push({ x, z: az + IN - 3.6, w: 7.5, d: 7 });
       }
-      tryPut(2.8, 2.9, (x, z) => spawn('kiosk', Math.floor(rng() * 3), x, z, rng() * 6));
+      tryPut(2.8, 2.9, (x, z) => spawn('kiosk', Math.floor(rng() * 3), x, z, Math.floor(rng() * 4) * Math.PI / 2));
       for (let k = 0; k < 4; k++) tryPut(1.6, 0.6, (x, z) => spawn('bench', 0, x, z, Math.floor(rng() * 4) * Math.PI / 2));
       for (let k = 0; k < 3; k++) tryPut(0.7, 0.7, (x, z) => spawn('trash', 0, x, z));
       for (let k = 0; k < 3; k++) tryPut(1.2, 1.2, (x, z) => spawn('bush', Math.floor(rng() * nTree), x, z));
@@ -453,7 +475,7 @@ function buildWorld(cfg) {
       for (let k = 0; k < 14; k++) tryPut(2.3, 2.3, (x, z) => spawn(th.snow && rng() < 0.5 ? 'pine' : 'tree', Math.floor(rng() * nTree), x, z, rng() * 6));
       for (let k = 0; k < 5; k++) tryPut(1.6, 0.6, (x, z) => spawn('bench', 0, x, z, Math.floor(rng() * 4) * Math.PI / 2));
       for (let k = 0; k < 6; k++) tryPut(1.3, 1.3, (x, z) => spawn('bush', Math.floor(rng() * nTree), x, z));
-      for (let k = 0; k < 3; k++) tryPut(0.6, 0.6, (x, z) => spawn('lamp', 0, x, z, rng() * 6));
+      for (let k = 0; k < 3; k++) tryPut(0.6, 0.6, (x, z) => spawn('lamp', 0, x, z, Math.floor(rng() * 4) * Math.PI / 2));
       walkers(6 + Math.floor(rng() * 6), ax + 1, az + 1, ax + IN - 1, az + IN - 1);
     } else {
       spawn('watertower', 0, ax + 4, az + 4, 0); rects.push({ x: ax + 4, z: az + 4, w: 5.5, d: 5.5 });
@@ -465,16 +487,16 @@ function buildWorld(cfg) {
 
     // тротуар по периметру квартала
     const edge = [
-      [b.x0 + 1, b.z0 + 1.2, b.x0 + B - 1, b.z0 + 1.2], [b.x0 + 1, b.z0 + B - 1.2, b.x0 + B - 1, b.z0 + B - 1.2],
-      [b.x0 + 1.2, b.z0 + 1, b.x0 + 1.2, b.z0 + B - 1], [b.x0 + B - 1.2, b.z0 + 1, b.x0 + B - 1.2, b.z0 + B - 1],
+      [b.x0 + 1, b.z0 + 1.2, b.x0 + B - 1, b.z0 + 1.2, Math.PI], [b.x0 + 1, b.z0 + B - 1.2, b.x0 + B - 1, b.z0 + B - 1.2, 0],
+      [b.x0 + 1.2, b.z0 + 1, b.x0 + 1.2, b.z0 + B - 1, -Math.PI / 2], [b.x0 + B - 1.2, b.z0 + 1, b.x0 + B - 1.2, b.z0 + B - 1, Math.PI / 2],
     ];
-    for (const [x1, z1, x2, z2] of edge) {
-      for (let t = 0.14; t < 1; t += 0.36) spawn('lamp', 0, lerp(x1, x2, t), lerp(z1, z2, t), rng() * 6);
+    for (const [x1, z1, x2, z2, face] of edge) {
+      for (let t = 0.14; t < 1; t += 0.36) spawn('lamp', 0, lerp(x1, x2, t), lerp(z1, z2, t), face);
       const extra = rng();
       const t = 0.3 + rng() * 0.4;
       if (extra < 0.3) spawn('hydrant', 0, lerp(x1, x2, t), lerp(z1, z2, t));
       else if (extra < 0.55) spawn('trash', 0, lerp(x1, x2, t), lerp(z1, z2, t));
-      else if (extra < 0.7) spawn('mailbox', 0, lerp(x1, x2, t), lerp(z1, z2, t), rng() * 6);
+      else if (extra < 0.7) spawn('mailbox', 0, lerp(x1, x2, t), lerp(z1, z2, t), face);
       else if (extra < 0.85) spawn('tree', Math.floor(rng() * nTree), lerp(x1, x2, t), lerp(z1, z2, t));
       const horiz = z1 === z2;
       const cnt = Math.floor(rng() * 3) + 1;
@@ -489,13 +511,13 @@ function buildWorld(cfg) {
   // транспорт на дорогах
   const vehiclePool = ['car', 'car', 'car', 'car', 'taxi', 'car', 'police', 'truck', 'bus', 'car', 'taxi', 'icecream'];
   const lanes = [];
-  for (let j = 0; j <= G; j++) for (const s of [-1, 1]) { lanes.push({ vert: true, c: roadC(j) + s * 2.2, dir: s }); lanes.push({ vert: false, c: roadC(j) - s * 2.2, dir: s }); }
+  for (let j = 0; j <= G; j++) for (const s of [-1, 1]) { lanes.push({ vert: true, rc: roadC(j), c: roadC(j) + s * 2.2, dir: s }); lanes.push({ vert: false, rc: roadC(j), c: roadC(j) - s * 2.2, dir: s }); }
   const addVehicle = (type, lane, pos) => {
     const v = type === 'car' ? Math.floor(rng() * 8) : Math.floor(rng() * 4);
     const sp = (type === 'bus' || type === 'truck' || type === 'firetruck' ? 4.5 : 6) + rng() * 2;
     const rot = lane.vert ? (lane.dir > 0 ? 0 : Math.PI) : (lane.dir > 0 ? Math.PI / 2 : -Math.PI / 2);
     const x = lane.vert ? lane.c : pos, z = lane.vert ? pos : lane.c;
-    spawn(type, v, x, z, rot, { kind: 'drive', vert: lane.vert, sp: sp * lane.dir });
+    spawn(type, v, x, z, rot, { kind: 'drive', vert: lane.vert, sp: sp * lane.dir, rc: lane.rc, off: lane.c - lane.rc });
   };
   for (const lane of lanes) {
     const cnt = Math.max(1, Math.round(S / 45 * (0.5 + rng() * 0.7)));
@@ -508,7 +530,7 @@ function buildWorld(cfg) {
   }
   for (const t of cfg.req) if (['bus', 'icecream', 'police', 'firetruck', 'truck'].includes(t)) addVehicle(t, pick(rng, lanes), -half + rng() * S);
   // остановки у дорог
-  for (let k = 0; k < G; k++) { const lane = pick(rng, lanes.filter((l) => l.vert)); spawn('busstop', 0, lane.c + (lane.dir > 0 ? 3.3 : -3.3) * (lane.c > roadC(0) + 1 ? 1 : 1) + (lane.dir > 0 ? 0.2 : -0.2), -half + W + rng() * (S - 2 * W), lane.dir > 0 ? Math.PI / 2 : -Math.PI / 2); }
+  for (let k = 0; k < G; k++) { const lane = pick(rng, lanes.filter((l) => l.vert && Math.abs(l.rc) < half - W)); spawn('busstop', 0, lane.c + (lane.dir > 0 ? 3.3 : -3.3) * (lane.c > roadC(0) + 1 ? 1 : 1) + (lane.dir > 0 ? 0.2 : -0.2), -half + W + rng() * (S - 2 * W), lane.dir > 0 ? Math.PI / 2 : -Math.PI / 2); }
 
   // --- создание мешей ---
   const nodes = [];
@@ -526,11 +548,20 @@ function buildWorld(cfg) {
     batches[key] = im; nodes.push(im); scene.add(im);
   }
   const objects = [];
-  const mk = (def, x, z, rot) => ({ x, y: 0, z, rot, tilt: 0, ax: 0, az: 0, w: def.w, d: def.d, h: def.h, fit: def.fit, name: def.name, type: def.type,
-    gain: 0.42 * Math.max(def.fit, 0.3) ** 2 * (def.h > 8 ? 1.25 : 1), state: 0, vy: 0, dead: false, move: null, req: false, beacon: null, wob: 0 });
+  const mk = (def, x, z, rot) => {
+    // габариты для столкновений с краем дыры: у круглых (крона, клумба) коробка уже
+    const cs = ROUND.has(def.type) ? 0.72 : 1;
+    const hw = def.w / 2 * cs, hd = def.d / 2 * cs, h = def.h;
+    const upright = h >= Math.max(hw, hd) * 2 * 0.9;
+    // какой радиус дыры нужен: высокое падает стоя, длинное — носом вниз
+    const need = upright ? Math.hypot(hw, hd) : Math.max(Math.hypot(Math.min(hw, hd), h / 2), Math.max(hw, hd) * 0.6);
+    return { x, y: 0, z, rot, tilt: 0, ax: 0, az: 0, w: def.w, d: def.d, h, hw, hd, upright, need, ext: Math.hypot(hw, hd), fit: def.fit, name: def.name, type: def.type,
+      gain: 0.42 * Math.max(def.fit, 0.3) ** 2 * (def.h > 8 ? 1.25 : 1), state: 0, vy: 0, w0: 0, dark: 1, dead: false, move: null, req: false, beacon: null, wob: 0 };
+  };
   for (const s of specs) {
     const def = defs[s.key]; const o = mk(def, s.x, s.z, s.rot);
     o.move = s.move; o.batch = batches[s.key]; o.idx = o.batch.count++;
+    o.batch.setColorAt(o.idx, WHITE);
     objects.push(o); writeMatrix(o);
   }
   for (const u of uniq) {
@@ -601,8 +632,25 @@ function buildWorld(cfg) {
   const stencilGround = { stencilWrite: true, stencilRef: 1, stencilFunc: THREE.NotEqualStencilFunc, stencilZPass: THREE.KeepStencilOp };
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(S, S).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ map: tex, ...stencilGround }));
   ground.renderOrder = -5; scene.add(ground); nodes.push(ground);
-  const outer = new THREE.Mesh(new THREE.PlaneGeometry(S * 5, S * 5).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: new THREE.Color(th.grass).multiplyScalar(0.85), ...stencilGround }));
-  outer.position.y = -0.03; outer.renderOrder = -6; scene.add(outer); nodes.push(outer);
+  // за картой вода, по краю бетонное ограждение в красно-белую полоску
+  const water = th.night ? 0x1d3350 : th.snow ? 0xcfe3ef : 0x49a9dc;
+  const outer = new THREE.Mesh(new THREE.PlaneGeometry(S * 6, S * 6).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: water, ...stencilGround }));
+  outer.position.y = -1.6; outer.renderOrder = -6; scene.add(outer); nodes.push(outer);
+  {
+    const p = new Parts(), T = 0.8, H = 1.1, E = half + T / 2, earth = 0x8a6a4a;
+    for (const [sx, sz] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) {
+      const along = sx === 0; // стенка вдоль оси x
+      // обрыв к воде
+      p.box(along ? S + 2 * T : 2.4, 2.2, along ? 2.4 : S + 2 * T, earth, sx * (half + 1.2), -2.2, sz * (half + 1.2));
+      const n = Math.round((S + 2 * T) / 2.2), seg = (S + 2 * T) / n;
+      for (let i = 0; i < n; i++) {
+        const t = -half - T + seg * (i + 0.5), c = i % 2 ? 0xf4f1ea : 0xe0453f;
+        p.box(along ? seg : T, H, along ? T : seg, c, along ? t : sx * E, 0, along ? sz * E : t);
+      }
+      p.box(along ? S + 2 * T : T + 0.1, 0.14, along ? T + 0.1 : S + 2 * T, 0xcfcac0, sx * E, H, sz * E);
+    }
+    const fence = new THREE.Mesh(p.build(), MAT); scene.add(fence); nodes.push(fence);
+  }
   scene.fog.color.set(th.sky);
 
   cfg.target = Math.min(cfg.target, Math.floor(objects.length * 0.45));
@@ -636,7 +684,7 @@ function tone(freq, dur = 0.12, type = 'sine', vol = 0.15, delay = 0) {
 function blip(fit) { const now = performance.now(); if (now - lastBlip < 45) return; lastBlip = now; tone(900 / (0.7 + fit * 0.6) + Math.random() * 60, 0.1 + fit * 0.04, 'triangle', 0.12); }
 
 // ---------- HUD ----------
-const hud = { timer: $('hud-timer'), level: $('hud-level'), bar: $('hud-bar-fill'), count: $('hud-count'), req: $('hud-req') };
+const hud = { stars: $('hud-stars'), timer: $('hud-timer'), level: $('hud-level'), bar: $('hud-bar-fill'), count: $('hud-count'), req: $('hud-req') };
 let lastHud = {};
 function buildReqChips() {
   hud.req.innerHTML = '';
@@ -644,7 +692,11 @@ function buildReqChips() {
 }
 function updateHud() {
   const t = fmtTime(game.time);
-  if (lastHud.t !== t) { hud.timer.textContent = t; hud.timer.classList.toggle('low', game.time <= 10); lastHud.t = t; }
+  if (lastHud.t !== t) {
+    hud.timer.textContent = t; hud.timer.classList.toggle('low', game.time <= 10); lastHud.t = t;
+    const st = starsFor(world.cfg, Math.ceil(game.time));
+    if (lastHud.st !== st) { [...hud.stars.children].forEach((s, i) => s.classList.toggle('on', i < st)); lastHud.st = st; }
+  }
   if (lastHud.e !== game.eaten) {
     const tg = world.cfg.target; hud.count.textContent = Math.min(game.eaten, tg) + ' / ' + tg;
     hud.bar.style.transform = `scaleX(${Math.min(1, game.eaten / tg)})`; lastHud.e = game.eaten;
@@ -683,6 +735,79 @@ document.addEventListener('visibilitychange', () => { if (document.hidden && gam
 const camPos = new THREE.Vector3(0, 60, 50), camLook = new THREE.Vector3();
 let last = performance.now(), menuAng = 0;
 
+// ---------- край дыры: предмет не может уйти под землю за окружностью ----------
+const _cw = Array.from({ length: 8 }, () => new THREE.Vector3());
+const EDGES = [[0, 1], [2, 3], [4, 5], [6, 7], [0, 2], [1, 3], [4, 6], [5, 7], [0, 4], [1, 5], [2, 6], [3, 7]];
+const viol = { v: 0, dx: 0, dz: 0, lift: 0, top: 0 };
+const angDiff = (a, b) => { let d = (a - b) % (Math.PI * 2); if (d > Math.PI) d -= Math.PI * 2; if (d < -Math.PI) d += Math.PI * 2; return d; };
+
+// v — на сколько самая дальняя подземная точка вылезла за край, lift — на сколько поднять, чтобы углы вышли из земли
+function checkRim(o, hx, hz, Rr) {
+  objQuat(o, _q);
+  for (let i = 0; i < 8; i++) {
+    _cw[i].set(i & 1 ? o.hw : -o.hw, i & 2 ? o.h : 0, i & 4 ? o.hd : -o.hd).applyQuaternion(_q);
+    _cw[i].x += o.x; _cw[i].y += o.y; _cw[i].z += o.z;
+  }
+  let v = 0, dx = 0, dz = 0, lift = 0, top = -1e9;
+  const test = (x, z) => {
+    const ex = x - hx, ez = z - hz, r = Math.hypot(ex, ez) || 1e-6, e = r - Rr;
+    if (e > v) { v = e; dx = ex / r; dz = ez / r; }
+    return e > 0;
+  };
+  for (const c of _cw) {
+    if (c.y > top) top = c.y;
+    if (c.y < 0 && test(c.x, c.z) && -c.y > lift) lift = -c.y;
+  }
+  for (const [a, b] of EDGES) {
+    const A = _cw[a], B = _cw[b];
+    if ((A.y < 0) !== (B.y < 0)) { const t = A.y / (A.y - B.y); test(A.x + (B.x - A.x) * t, A.z + (B.z - A.z) * t); }
+  }
+  viol.v = v; viol.dx = dx; viol.dz = dz; viol.lift = lift; viol.top = top;
+  return viol;
+}
+
+function startFall(o, hx, hz) {
+  let ux = hx - o.x, uz = hz - o.z; const L = Math.hypot(ux, uz);
+  if (L < 0.05) { ux = Math.sin(o.rot); uz = Math.cos(o.rot); } else { ux /= L; uz /= L; }
+  o.state = 1; o.vy = 0; o.w0 = 0; o.fallT = 0; o.move = null;
+  // наклон верхушкой к центру дыры
+  o.ax = uz; o.az = -ux;
+  // длинное разворачиваем вдоль направления к центру, чтобы оно ушло носом вниз
+  if (!o.upright) {
+    const base = o.hw > o.hd ? Math.atan2(-uz, ux) : Math.atan2(ux, uz);
+    o.yawT = Math.abs(angDiff(base, o.rot)) < Math.PI / 2 ? base : base + Math.PI;
+  } else o.yawT = o.rot;
+  if (o.beacon) o.beacon.visible = false;
+}
+
+function fallStep(o, dt, hx, hz, R) {
+  o.fallT += dt;
+  // если застрял на краю дольше 4 с — край понемногу «уступает»
+  const Rr = R * 1.08 + Math.max(0, o.fallT - 4) * 2;
+  // высокое падает почти стоя, длинное переворачивается носом вниз
+  const tmax = o.upright ? clamp((Rr - o.need) / (o.h * 0.5), 0, 0.07) : Math.PI / 2;
+  o.w0 = Math.min(o.w0 + dt * (o.upright ? 0.6 : 6), o.upright ? 0.3 : 3.2);
+  o.tilt = Math.min(tmax, o.tilt + o.w0 * dt);
+  o.rot += angDiff(o.yawT, o.rot) * (1 - Math.exp(-dt * 7));
+  // центр масс тянется к центру дыры
+  objQuat(o, _q); _vv.set(0, o.upright ? 0 : o.h / 2, 0).applyQuaternion(_q);
+  const k = 1 - Math.exp(-dt * 4);
+  o.x += (hx - o.x - _vv.x) * k; o.z += (hz - o.z - _vv.z) * k;
+  o.vy -= (30 + o.h) * dt; o.y += o.vy * dt;
+  for (let it = 0; it < 10; it++) {
+    const c = checkRim(o, hx, hz, Rr);
+    if (c.v <= 0.002) break;
+    if (it < 3) { o.x -= c.dx * c.v; o.z -= c.dz * c.v; }
+    else { o.y += Math.max(c.lift, c.v * 0.5, 0.04); if (o.vy < 0) o.vy = 0; }
+  }
+  const top = checkRim(o, hx, hz, Rr).top;
+  objQuat(o, _q); _vv.set(0, o.h / 2, 0).applyQuaternion(_q);
+  o.cx = o.x + _vv.x; o.cz = o.z + _vv.z;
+  const cy = o.y + _vv.y;
+  setDark(o, clamp(1 + cy / (1.5 + R * 0.9), 0, 1));
+  return top;
+}
+
 function step(dt) {
   const o_ = world.objects;
   const playing = game.state === 'play';
@@ -695,8 +820,10 @@ function step(dt) {
     if (k.KeyW || k.ArrowUp) mz -= 1; if (k.KeyS || k.ArrowDown) mz += 1; if (k.KeyA || k.ArrowLeft) mx -= 1; if (k.KeyD || k.ArrowRight) mx += 1;
     const L = Math.hypot(mx, mz); if (L > 1) { mx /= L; mz /= L; }
     const sp = 8.5 + game.R * 1.1;
-    game.x = clamp(game.x + mx * sp * dt, -world.half + 1.5, world.half - 1.5);
-    game.z = clamp(game.z + mz * sp * dt, -world.half + 1.5, world.half - 1.5);
+    // край дыры упирается в ограждение карты
+    const lim = world.half - Math.min(game.R, world.half * 0.5) - 0.2;
+    game.x = clamp(game.x + mx * sp * dt, -lim, lim);
+    game.z = clamp(game.z + mz * sp * dt, -lim, lim);
     game.time -= dt;
   }
   game.R = lerp(game.R, game.Rt, 1 - Math.exp(-dt * 6));
@@ -711,8 +838,21 @@ function step(dt) {
       const mv = o.move;
       if (mv) {
         if (mv.kind === 'drive') {
-          if (mv.vert) { o.z += mv.sp * dt; if (o.z > world.half + 4) o.z -= world.S + 8; else if (o.z < -world.half - 4) o.z += world.S + 8; }
-          else { o.x += mv.sp * dt; if (o.x > world.half + 4) o.x -= world.S + 8; else if (o.x < -world.half - 4) o.x += world.S + 8; }
+          // у ограждения машина разворачивается на встречную полосу по полукругу
+          const end = world.half - 3 - o.d / 2 - Math.abs(mv.off) * 0.9;
+          if (mv.turn !== undefined) {
+            mv.turn = Math.min(Math.PI, mv.turn + dt * Math.abs(mv.sp) / Math.abs(mv.off));
+            const s = Math.sign(mv.sp), c = Math.cos(mv.turn), sn = Math.sin(mv.turn);
+            const lat = mv.rc + mv.off * c, lon = mv.end + s * Math.abs(mv.off) * sn * 0.9;
+            const nx = mv.vert ? lat : lon, nz = mv.vert ? lon : lat;
+            if (nx !== o.x || nz !== o.z) o.rot = Math.atan2(nx - o.x, nz - o.z);
+            o.x = nx; o.z = nz;
+            if (mv.turn >= Math.PI) { mv.turn = undefined; mv.off = -mv.off; mv.sp = -mv.sp; o.rot = mv.vert ? (mv.sp > 0 ? 0 : Math.PI) : (mv.sp > 0 ? Math.PI / 2 : -Math.PI / 2); }
+          } else {
+            const p = (mv.vert ? o.z : o.x) + mv.sp * dt;
+            if (mv.vert) o.z = p; else o.x = p;
+            if ((mv.sp > 0 && p > end) || (mv.sp < 0 && p < -end)) { mv.turn = 0; mv.end = mv.sp > 0 ? end : -end; }
+          }
           moved = true;
         } else if (mv.kind === 'side') {
           const p = mv.horiz ? o.x : o.z; let np = p + mv.sp * dt;
@@ -733,31 +873,35 @@ function step(dt) {
       }
       if (playing) {
         const dx = o.x - hx, dz = o.z - hz;
-        const reach = R + o.fit;
+        const reach = R + o.ext;
+        let near = false;
         if (dx > -reach && dx < reach && dz > -reach && dz < reach) {
           const d = Math.sqrt(dx * dx + dz * dz);
-          const fits = o.fit <= R * 0.92;
-          if (fits && d < R - o.fit * 0.55) {
-            o.state = 1; o.vy = 0; o.ax = -dz; o.az = dx; o.move = null;
-            if (o.beacon) { o.beacon.visible = false; }
-          } else if (fits && d < R + o.fit * 0.25) {
+          const fits = o.need * 0.93 <= R;
+          if (fits && d < R - o.need * 0.3) {
+            startFall(o, hx, hz); near = true;
+          } else if (fits && d < R + o.ext * 0.3) {
+            // висит над краем: сползает к дыре и кренится, но в землю за краем не проваливается
             const pull = (2 + R * 0.6) * dt; o.x -= dx / (d || 1) * pull; o.z -= dz / (d || 1) * pull;
-            o.tilt = Math.min(0.35, (R + o.fit * 0.25 - d) * 0.25); o.ax = -dz; o.az = dx; moved = true;
-          } else if (!fits && d < R * 0.95 + o.fit * 0.2) {
-            o.wob += dt; o.tilt = Math.sin(o.wob * 22) * 0.035; o.ax = 1; o.az = 0.4; moved = true;
-          } else if (o.tilt) { o.tilt = 0; moved = true; }
-        } else if (o.tilt) { o.tilt = 0; moved = true; }
+            o.tilt = Math.min(0.35, (R + o.ext * 0.3 - d) * 0.25); o.ax = -dz; o.az = dx; o.y = 0;
+            for (let it = 0; it < 3; it++) { const c = checkRim(o, hx, hz, R * 1.08); if (c.lift <= 0) break; o.y += c.lift; }
+            moved = near = true;
+          } else if (!fits && d < R * 0.95 + o.ext * 0.3) {
+            o.wob += dt; o.tilt = Math.sin(o.wob * 22) * 0.035; o.ax = 1; o.az = 0.4; o.y = 0; moved = near = true;
+          }
+        }
+        if (!near && (o.tilt || o.y)) { o.tilt = 0; o.y = 0; moved = true; if (o.dark < 1) setDark(o, 1); }
       }
       if (o.beacon) { o.beacon.position.set(o.x, o.h + 2.5 + Math.sin(game.t * 3) * 0.5, o.z); o.beacon.rotation.y = game.t * 2; }
     }
     if (o.state === 1) {
-      const dx = hx - o.x, dz = hz - o.z;
-      const k = 1 - Math.exp(-dt * 3);
-      o.x += dx * k; o.z += dz * k;
-      o.vy -= (30 + o.h * 1.5) * dt; o.y += o.vy * dt;
-      o.tilt = Math.min(1.35, o.tilt + dt * (2.8 - Math.min(1.6, o.h * 0.04)));
+      const top = fallStep(o, dt, hx, hz, R);
       moved = true;
-      if (o.y < -(o.h + 1.5) || o.y < -60) swallow(o);
+      // дыра уехала раньше, чем предмет провалился: он остаётся на земле
+      const ex = o.cx - hx, ez = o.cz - hz;
+      if (o.y > -0.3 && ex * ex + ez * ez > (R + 0.4) * (R + 0.4)) {
+        o.state = 0; o.tilt = 0; o.y = 0; o.vy = 0; setDark(o, 1); if (o.beacon) o.beacon.visible = true;
+      } else if ((top < -0.4 && o.dark < 0.08) || top < -(R * 2 + 6) || o.y < -60) swallow(o);
     }
     if (moved) writeMatrix(o);
   }
@@ -840,6 +984,7 @@ function openIntro(n) {
   tag.textContent = cfg.superHard ? 'Очень сложный' : cfg.hard ? 'Сложный' : cfg.theme.name;
   $('intro-target').textContent = cfg.target;
   $('intro-time').textContent = fmtTime(cfg.time);
+  { const [c2, c3] = starCut(cfg); $('intro-stars').innerHTML = `<b>★★★</b> если на таймере останется ${fmtTime(c3)}<br><b>★★</b> если ${fmtTime(c2)}, <b>★</b> за любую победу`; }
   $('intro-req').innerHTML = world.reqs.map((r) => `<span class="chip">${r.name}</span>`).join('');
   $('intro-hint').classList.toggle('hidden', n > 2);
   hud.level.textContent = 'Ур. ' + n;
@@ -857,11 +1002,16 @@ function finish(win) {
   const endEl = $('end');
   endEl.classList.toggle('win', win);
   $('end-title').textContent = win ? 'Уровень пройден' : 'Время вышло';
-  const stars = win ? (game.time / cfg.time > 0.4 ? 3 : game.time / cfg.time > 0.2 ? 2 : 1) : 0;
+  const left = Math.ceil(game.time), [c2, c3] = starCut(cfg);
+  const stars = win ? starsFor(cfg, left) : 0;
   [...document.querySelectorAll('#end-stars .star')].forEach((s, i) => s.classList.toggle('on', i < stars));
   $('end-stars').classList.toggle('hidden', !win);
   let msg;
-  if (win) msg = `Проглочено ${game.eaten}. В запасе ${fmtTime(game.time)}.`;
+  if (win) {
+    msg = `Проглочено ${game.eaten}. На таймере осталось ${fmtTime(left)}.`;
+    if (stars === 2) msg += ` Третья звезда, если останется ${fmtTime(c3)}.`;
+    if (stars === 1) msg += ` Вторая звезда, если останется ${fmtTime(c2)}, третья — ${fmtTime(c3)}.`;
+  }
   else {
     const missN = cfg.target - game.eaten; const missR = world.reqs.filter((r) => !r.done).map((r) => r.name);
     const parts = []; if (missN > 0) parts.push(`не хватило ${missN} ${plural(missN, 'предмета', 'предметов', 'предметов')}`);
@@ -920,7 +1070,7 @@ syncMute();
 
 toMenu();
 requestAnimationFrame(frame);
-window.__game = { game, input, renderer, scene, camera, sim(secs, cb) { for (let t = 0; t < secs && game.state === "play"; t += 1 / 30) { cb && cb(); step(1 / 30); } }, get world() { return world; }, openIntro, startPlay, levelConfig };
+window.__game = { game, input, renderer, scene, camera, sim(secs, cb) { for (let t = 0; t < secs && game.state === "play"; t += 1 / 30) { cb && cb(); step(1 / 30); } }, get world() { return world; }, checkRim, openIntro, startPlay, levelConfig };
 
 // ---------- Android-приложение ----------
 const Cap = window.Capacitor;

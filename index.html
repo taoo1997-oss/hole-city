@@ -101,6 +101,11 @@
   #hud-level { font-size: 16px; padding: 10px 12px; }
   #hud-req .chip { font-size: 13px; padding: 5px 10px; box-shadow: 0 3px 10px rgba(20,12,40,.2); }
   #hud-pause { pointer-events: auto; }
+  #hud-stars { display: flex; gap: 2px; padding: 7px 10px; }
+  #hud-stars svg { width: 18px; height: 18px; fill: #e6dac6; transition: fill .3s; }
+  #hud-stars svg.on { fill: var(--gold); }
+  .stars-rule { margin: 0 0 12px; color: var(--ink-2); font-weight: 600; font-size: 14px; line-height: 1.5; }
+  .stars-rule b { color: var(--gold-d); letter-spacing: .05em; }
   .hud-left { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
 
   #joy { position: fixed; left: 0; top: 0; width: 0; height: 0; pointer-events: none; opacity: 0; transition: opacity .15s; }
@@ -161,6 +166,7 @@
       <div class="goal"><b id="intro-target"></b><span>проглотить</span></div>
       <div class="goal"><b id="intro-time"></b><span>на всё</span></div>
     </div>
+    <p id="intro-stars" class="stars-rule"></p>
     <p class="req-label">И обязательно найти:</p>
     <div id="intro-req" class="chips"></div>
     <p id="intro-hint" class="hint">Тяни пальцем или мышкой в любом месте экрана. На клавиатуре WASD или стрелки. Начни с мелочи: люди, урны, конусы. Чем больше съешь, тем шире дыра. Жёлтая стрелка ведёт к обязательным предметам.</p>
@@ -175,6 +181,7 @@
   <div class="hud-top">
     <div class="hud-left">
       <div id="hud-timer" class="pill">0:00</div>
+      <div id="hud-stars" class="pill" aria-label="Звёзды, если закончить сейчас"><svg viewBox="0 0 24 24"><path d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5L2.5 9.4l6.6-.9z"/></svg><svg viewBox="0 0 24 24"><path d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5L2.5 9.4l6.6-.9z"/></svg><svg viewBox="0 0 24 24"><path d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5L2.5 9.4l6.6-.9z"/></svg></div>
       <div id="hud-level" class="pill">Ур. 1</div>
     </div>
     <div class="hud-mid">
@@ -216,6 +223,6 @@
   </div>
 </section>
 
-<script type="module" src="js/game.js?v=6"></script>
+<script type="module" src="js/game.js?v=11"></script>
 </body>
 </html>
