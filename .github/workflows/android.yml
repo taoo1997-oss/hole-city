@@ -43,7 +43,7 @@ jobs:
             cp android-icons/$d.png $RES/mipmap-$d/ic_launcher_round.png
             rm -f $RES/mipmap-$d/ic_launcher_foreground.png
           done
-          # экран не гаснет от поворота, полноэкранный режим
+          # поворот экрана в любую сторону
           sed -i 's|android:configChanges="|android:screenOrientation="fullUser" android:configChanges="|' android/app/src/main/AndroidManifest.xml
 
       - name: Сборка

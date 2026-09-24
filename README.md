@@ -8,3 +8,6 @@
 - Без рекламы, без онлайна. Прогресс хранится в браузере.
 
 Играть: https://taoo1997-oss.github.io/hole-city/
+
+Android: https://github.com/taoo1997-oss/hole-city/releases/download/apk/hole-city.apk
+APK пересобирается сам при каждом пуше в main (GitHub Actions, Capacitor), ссылка не меняется.
